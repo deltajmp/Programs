@@ -1113,26 +1113,20 @@ export default function FinanceDashboard() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [activeSection, setActiveSection] = useState("profile");
 
-  // Persist state
+  // Persist state to localStorage
   useEffect(() => {
-    async function loadState() {
-      try {
-        const result = await window.storage.get("finance-dashboard-state");
-        if (result && result.value) {
-          dispatch({ type: "LOAD_STATE", payload: JSON.parse(result.value) });
-        }
-      } catch (e) { /* no stored state yet */ }
-    }
-    loadState();
+    try {
+      const saved = localStorage.getItem("finance-dashboard-state");
+      if (saved) {
+        dispatch({ type: "LOAD_STATE", payload: JSON.parse(saved) });
+      }
+    } catch (e) { /* no stored state yet */ }
   }, []);
 
   useEffect(() => {
-    async function saveState() {
-      try {
-        await window.storage.set("finance-dashboard-state", JSON.stringify(state));
-      } catch (e) { /* storage unavailable */ }
-    }
-    if (state !== initialState) saveState();
+    try {
+      localStorage.setItem("finance-dashboard-state", JSON.stringify(state));
+    } catch (e) { /* storage unavailable */ }
   }, [state]);
 
   const renderSection = () => {
