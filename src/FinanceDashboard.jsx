@@ -415,8 +415,8 @@ const styles = {
   tipCard: (type) => ({
     background: type === "warning" ? colors.redDim : type === "caution" ? colors.yellowDim : type === "positive" ? colors.greenDim : colors.inputBg,
     borderRadius: "10px",
-    padding: "14px 16px",
-    marginBottom: "10px",
+    padding: "16px 18px",
+    marginBottom: "20px",
     borderLeft: `4px solid ${type === "warning" ? colors.red : type === "caution" ? colors.yellow : type === "positive" ? colors.green : colors.accent}`,
   }),
   tag: {
@@ -444,10 +444,10 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: "12px 16px",
+    padding: "14px 16px",
     background: colors.inputBg,
     borderRadius: "8px",
-    marginBottom: "8px",
+    marginBottom: "16px",
     border: `1px solid ${colors.border}`,
   },
   disclaimer: {
