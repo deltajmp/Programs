@@ -166,8 +166,110 @@ function getDynamicTips(state) {
   const dayOfMonth = now.getDate();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const monthProgress = dayOfMonth / daysInMonth;
+  const totalBudgeted = state.expenseCategories.reduce((s, c) => s + (parseFloat(c.budgeted) || 0), 0);
+  const monthlySurplus = monthlyIncome - totalBudgeted;
+  const savingsRate = monthlyIncome > 0 && totalBudgeted > 0 ? monthlySurplus / monthlyIncome : 0;
+  const totalLoanBalance = state.loans.reduce((s, l) => s + (parseFloat(l.balance) || 0), 0);
+  const avgLoanRate = state.loans.length > 0 ? state.loans.reduce((s, l) => s + (parseFloat(l.rate) || 0), 0) / state.loans.length : 0;
+  const highInterestLoans = state.loans.filter((l) => (parseFloat(l.rate) || 0) >= 6);
+  const age = state.profile.age || 28;
+  const magi = state.profile.agi || annualIncome;
+  const isResident = state.profile.isResident;
+  const filingStatus = state.profile.filingStatus;
+  const taxRefund = parseFloat(state.profile.taxRefund) || 0;
 
-  // Check each category for overspending
+  // ── No data yet — prompt user to fill in info ──
+  if (state.incomes.length === 0 && state.loans.length === 0 && state.expenseCategories.length === 0) {
+    tips.push({ type: "info", category: "Get Started", message: "Add your income, expenses, and loans to get personalized financial guidance. The more information you provide, the more specific your action plan will be." });
+    return tips;
+  }
+
+  // ── YOUR FINANCIAL SNAPSHOT ──
+  if (monthlyIncome > 0) {
+    let snapshot = `You're bringing in ${fmt(monthlyIncome)}/month (${fmt(annualIncome)}/year).`;
+    if (totalBudgeted > 0) {
+      snapshot += ` After your budgeted expenses of ${fmt(totalBudgeted)}/month, you have ${fmt(monthlySurplus)}/month (${pct(savingsRate)}) available for savings, investing, and debt payoff.`;
+    }
+    if (totalLoanBalance > 0) {
+      snapshot += ` You're carrying ${fmt(totalLoanBalance)} in total loan debt at an average rate of ${avgLoanRate.toFixed(1)}%.`;
+    }
+    tips.push({ type: "info", category: "Your Snapshot", message: snapshot });
+  }
+
+  // ── PERSONALIZED ACTION PLAN ──
+  // Build a priority-ordered plan based on actual finances
+  if (monthlyIncome > 0) {
+    const actions = [];
+    const rothLimit = age >= 50 ? 8600 : 7500;
+    const rothMonthly = Math.round(rothLimit / 12);
+    const limits = filingStatus === "married" ? FINANCIAL_CONSTANTS.rothIRA.marriedPhaseOut : FINANCIAL_CONSTANTS.rothIRA.singlePhaseOut;
+    const rothEligible = magi < limits[1];
+
+    // Step 1: Emergency fund check
+    const emergencyTarget = totalBudgeted > 0 ? totalBudgeted * 3 : monthlyIncome * 3;
+    actions.push(`Build a ${fmt(emergencyTarget)} to ${fmt(emergencyTarget * 2)} emergency fund (3-6 months of expenses). Keep it in a high-yield savings account earning 4-5% APY.`);
+
+    // Step 2: High-interest debt
+    if (highInterestLoans.length > 0) {
+      const hiBalance = highInterestLoans.reduce((s, l) => s + (parseFloat(l.balance) || 0), 0);
+      const hiRate = Math.max(...highInterestLoans.map((l) => parseFloat(l.rate) || 0));
+      actions.push(`Aggressively pay down your ${fmt(hiBalance)} in high-interest debt (${hiRate.toFixed(1)}%+). At these rates, every ${fmt(1000)} extra payment saves you ${fmt(Math.round(1000 * hiRate / 100))}/year in interest. Consider the avalanche method — target the highest rate first.`);
+    }
+
+    // Step 3: Employer match
+    actions.push(`If your employer offers a 401(k) match, contribute at least enough to get the full match before doing anything else — it's an instant 50-100% return. Even 3% of ${fmt(annualIncome)} is ${fmt(Math.round(annualIncome * 0.03))}/year.`);
+
+    // Step 4: Roth IRA
+    if (rothEligible) {
+      if (magi < limits[0]) {
+        if (isResident) {
+          actions.push(`You qualify for full Roth IRA contributions. As a resident, this is one of your best moves — you're in a low tax bracket now, but your attending salary will push you into a much higher one. Max out at ${fmt(rothLimit)}/year (${fmt(rothMonthly)}/month). Every dollar you put in now grows tax-free forever.`);
+        } else if (age < 35) {
+          actions.push(`You qualify for full Roth IRA contributions of ${fmt(rothLimit)}/year (${fmt(rothMonthly)}/month). At age ${age}, you have ${65 - age} years of tax-free growth ahead. If you max it out every year, at 7% average return that's roughly ${fmt(Math.round(rothLimit * (Math.pow(1.07, 65 - age) - 1) / 0.07))} by age 65.`);
+        } else {
+          actions.push(`You qualify for full Roth IRA contributions of ${fmt(rothLimit)}/year (${fmt(rothMonthly)}/month). At age ${age}, maximizing tax-free growth is important — prioritize this alongside your 401(k).`);
+        }
+      } else {
+        actions.push(`Your income (${fmt(magi)}) falls in the Roth IRA phase-out range (${fmt(limits[0])} - ${fmt(limits[1])}). Your direct contribution is reduced, but you can use the backdoor Roth IRA strategy: contribute to a traditional IRA, then convert to Roth. Talk to a CPA to ensure you do this correctly.`);
+      }
+    } else if (annualIncome > 0) {
+      actions.push(`Your income (${fmt(magi)}) exceeds the Roth IRA direct contribution limit. Use the backdoor Roth IRA strategy: contribute ${fmt(rothLimit)} to a traditional IRA, then convert to Roth. This is widely used and IRS-permitted, but consult a CPA about pro-rata rules if you have existing traditional IRA balances.`);
+    }
+
+    // Step 5: Max 401(k)
+    const max401k = age >= 60 && age <= 63 ? FINANCIAL_CONSTANTS.four01k.catchUp60_63 : age >= 50 ? FINANCIAL_CONSTANTS.four01k.catchUp50 : FINANCIAL_CONSTANTS.four01k.limit;
+    if (monthlySurplus > rothMonthly + 500) {
+      actions.push(`After Roth IRA, push your 401(k) toward the ${fmt(max401k)} limit if possible. That's ${fmt(Math.round(max401k / 12))}/month. This reduces your taxable income by the full contribution amount, saving you ${fmt(Math.round(max401k * (annualIncome > 190000 ? 0.32 : annualIncome > 89000 ? 0.24 : annualIncome > 41000 ? 0.22 : 0.12)))}/year in taxes.`);
+    }
+
+    // Step 6: Loan strategy
+    if (totalLoanBalance > 0 && highInterestLoans.length === 0) {
+      if (isResident && totalLoanBalance > 100000) {
+        actions.push(`With ${fmt(totalLoanBalance)} in loans at moderate rates (avg ${avgLoanRate.toFixed(1)}%), don't rush to pay them off during residency. If you're at a nonprofit hospital, enroll in an income-driven repayment plan and start PSLF qualification. Your low resident income means low payments, and every payment counts toward the 120 required for forgiveness.`);
+      } else if (avgLoanRate < 5) {
+        actions.push(`Your ${fmt(totalLoanBalance)} in loans at ${avgLoanRate.toFixed(1)}% average rate is relatively low-cost debt. Since the stock market historically returns 7-10%/year, you may benefit more from investing extra cash rather than aggressively paying down these loans. Make minimum payments and invest the difference.`);
+      } else {
+        actions.push(`Consider splitting extra cash between investing and accelerating your ${fmt(totalLoanBalance)} in loan payoff. At ${avgLoanRate.toFixed(1)}% average interest, paying an extra ${fmt(200)}/month would save you ${fmt(Math.round(totalLoanBalance * avgLoanRate / 100 * 0.15))} in interest over the life of the loans.`);
+      }
+    }
+
+    // Step 7: Tax refund strategy
+    if (taxRefund > 500) {
+      if (totalLoanBalance > 0 && highInterestLoans.length > 0) {
+        actions.push(`Your ${fmt(taxRefund)} tax refund should go directly toward your highest-interest debt. Applying it as a lump sum early in the year reduces the principal that accrues daily interest, saving more than spreading it out.`);
+      } else if (rothEligible) {
+        actions.push(`Consider putting your ${fmt(taxRefund)} tax refund directly into your Roth IRA. That's ${pct(taxRefund / rothLimit)} of your annual limit covered in one move, and every dollar starts compounding tax-free immediately.`);
+      } else {
+        actions.push(`Your ${fmt(taxRefund)} tax refund is a great lump sum for investing. Consider putting it into a brokerage account in a low-cost total market index fund.`);
+      }
+    }
+
+    if (actions.length > 0) {
+      tips.push({ type: "info", category: "Your Action Plan", message: `Based on your finances, here's your recommended priority order:\n\n${actions.map((a, i) => `${i + 1}. ${a}`).join("\n\n")}` });
+    }
+  }
+
+  // ── SPENDING ALERTS ──
   state.expenseCategories.forEach((cat) => {
     const budget = parseFloat(cat.budgeted) || 0;
     if (budget <= 0) return;
@@ -175,39 +277,51 @@ function getDynamicTips(state) {
     const spendPct = spent / budget;
 
     if (spendPct > 1) {
-      tips.push({ type: "warning", category: cat.name, message: `You've exceeded your ${cat.name} budget by ${fmt(spent - budget)}. Consider cutting back for the rest of the month.` });
+      tips.push({ type: "warning", category: cat.name, message: `You've exceeded your ${cat.name} budget by ${fmt(spent - budget)}. That's ${fmt((spent - budget) * 12)}/year if this repeats monthly. Look for where to cut back — even small recurring expenses add up.` });
     } else if (spendPct > 0.8 && monthProgress < 0.7) {
-      tips.push({ type: "caution", category: cat.name, message: `You've used ${pct(spendPct)} of your ${cat.name} budget but you're only ${pct(monthProgress)} through the month. Pace yourself.` });
+      tips.push({ type: "caution", category: cat.name, message: `You've spent ${fmt(spent)} of your ${fmt(budget)} ${cat.name} budget (${pct(spendPct)}) but you're only ${pct(monthProgress)} through the month. You have about ${fmt(budget - spent)} left for the next ${Math.round((1 - monthProgress) * daysInMonth)} days — that's roughly ${fmt(Math.round((budget - spent) / Math.max(1, Math.round((1 - monthProgress) * daysInMonth))))} per day.` });
     } else if (spendPct < 0.5 && monthProgress > 0.7) {
-      tips.push({ type: "positive", category: cat.name, message: `Great job on ${cat.name}! You've only used ${pct(spendPct)} of your budget with ${Math.round((1 - monthProgress) * daysInMonth)} days left.` });
+      const surplus = budget - spent;
+      tips.push({ type: "positive", category: cat.name, message: `Great job on ${cat.name}! You've only used ${pct(spendPct)} with ${Math.round((1 - monthProgress) * daysInMonth)} days left. That ${fmt(surplus)} surplus could go toward your savings goals or debt payoff.` });
     }
   });
 
-  // Retirement contribution tip based on income
-  if (annualIncome > 0) {
-    const recommendedRetirement = annualIncome * 0.15;
-    tips.push({ type: "info", category: "Retirement", message: `Based on your income, financial advisors generally recommend saving about ${fmt(recommendedRetirement)}/year (${fmt(recommendedRetirement / 12)}/month) toward retirement.` });
-
-    // Roth IRA eligibility
-    const magi = state.profile.agi || annualIncome;
-    const limits = state.profile.filingStatus === "married" ? FINANCIAL_CONSTANTS.rothIRA.marriedPhaseOut : FINANCIAL_CONSTANTS.rothIRA.singlePhaseOut;
-    if (magi < limits[0]) {
-      tips.push({ type: "positive", category: "Roth IRA", message: `Your income qualifies for full Roth IRA contributions of ${fmt(state.profile.age >= 50 ? 8600 : 7500)}/year for 2026.` });
-    } else if (magi < limits[1]) {
-      tips.push({ type: "caution", category: "Roth IRA", message: `Your income falls in the Roth IRA phase-out range. Your contribution may be reduced. Consider a backdoor Roth IRA strategy.` });
+  // ── SAVINGS RATE ASSESSMENT ──
+  if (monthlyIncome > 0 && totalBudgeted > 0) {
+    if (savingsRate < 0) {
+      tips.push({ type: "warning", category: "Budget Gap", message: `Your expenses exceed your income by ${fmt(Math.abs(monthlySurplus))}/month (${fmt(Math.abs(monthlySurplus) * 12)}/year). This is unsustainable. Review your expense categories to find what you can cut. Start with the largest discretionary categories.` });
+    } else if (savingsRate < 0.1) {
+      const neededCut = Math.round(monthlyIncome * 0.2 - monthlySurplus);
+      tips.push({ type: "warning", category: "Savings Rate", message: `Your savings rate is only ${pct(savingsRate)} — you're saving ${fmt(monthlySurplus)}/month. To reach the recommended 20%, you'd need to free up an additional ${fmt(neededCut)}/month. Look at your top 2-3 expense categories for potential cuts.` });
+    } else if (savingsRate < 0.2) {
+      const neededCut = Math.round(monthlyIncome * 0.2 - monthlySurplus);
+      tips.push({ type: "caution", category: "Savings Rate", message: `Your savings rate is ${pct(savingsRate)} (${fmt(monthlySurplus)}/month). You're close to the 20% target — just ${fmt(neededCut)}/month more would get you there. Even small adjustments to dining out or subscriptions could close this gap.` });
+    } else if (savingsRate >= 0.3) {
+      tips.push({ type: "positive", category: "Savings Rate", message: `Excellent — your savings rate is ${pct(savingsRate)} (${fmt(monthlySurplus)}/month). You're well above the 20% target. At this rate, you're on a strong path toward financial independence. Make sure this surplus is actually being invested, not sitting idle in a checking account.` });
     } else {
-      tips.push({ type: "warning", category: "Roth IRA", message: `Your income exceeds the Roth IRA direct contribution limit. Look into the backdoor Roth IRA strategy.` });
+      tips.push({ type: "positive", category: "Savings Rate", message: `Your savings rate is ${pct(savingsRate)} (${fmt(monthlySurplus)}/month) — you're meeting the 20% target. Keep it up, and make sure this money is working for you in retirement accounts or investments.` });
     }
   }
 
-  // Savings rate check
-  const totalBudgeted = state.expenseCategories.reduce((s, c) => s + (parseFloat(c.budgeted) || 0), 0);
-  if (monthlyIncome > 0 && totalBudgeted > 0) {
-    const savingsRate = (monthlyIncome - totalBudgeted) / monthlyIncome;
-    if (savingsRate < 0.1) {
-      tips.push({ type: "warning", category: "Savings", message: `Your savings rate is only ${pct(savingsRate)}. Aim for at least 20% to build long-term wealth.` });
-    } else if (savingsRate >= 0.2) {
-      tips.push({ type: "positive", category: "Savings", message: `Your savings rate is ${pct(savingsRate)} — you're meeting or exceeding the recommended 20% target.` });
+  // ── RESIDENT-SPECIFIC GUIDANCE ──
+  if (isResident && monthlyIncome > 0) {
+    if (totalLoanBalance > 150000) {
+      tips.push({ type: "info", category: "Resident Strategy", message: `With ${fmt(totalLoanBalance)} in student loans on a resident salary, PSLF is likely your best path if you're at a qualifying nonprofit employer. Enroll in PAYE or REPAYE to minimize payments during training — your payments could be as low as ${fmt(Math.round((annualIncome - 26000) * 0.10 / 12))}/month on income-driven repayment. Every payment counts toward the 120 needed for tax-free forgiveness.` });
+    }
+    if (annualIncome < 90000) {
+      tips.push({ type: "positive", category: "Resident Tax Advantage", message: `At ${fmt(annualIncome)}/year, you're in the ${annualIncome > 44725 ? "22%" : "12%"} federal tax bracket — likely the lowest bracket you'll ever be in as a physician. This makes Roth contributions extremely valuable right now. Once you're an attending at $250K+, you'll be in the 32-35% bracket and these Roth dollars would cost much more to contribute.` });
+    }
+  }
+
+  // ── AGE-BASED GUIDANCE ──
+  if (annualIncome > 0) {
+    if (age < 30) {
+      const yearsToRetire = 65 - age;
+      tips.push({ type: "info", category: "Time Advantage", message: `At age ${age}, time is your greatest asset. Even ${fmt(300)}/month invested at 7% average return grows to roughly ${fmt(Math.round(300 * (Math.pow(1 + 0.07 / 12, yearsToRetire * 12) - 1) / (0.07 / 12)))} by age 65. Don't wait for the "perfect" time — start now and increase contributions as your income grows.` });
+    } else if (age >= 50 && age < 60) {
+      tips.push({ type: "info", category: "Catch-Up Contributions", message: `At age ${age}, you qualify for catch-up contributions: ${fmt(FINANCIAL_CONSTANTS.four01k.catchUp50)}/year in your 401(k) and ${fmt(8600)}/year in your IRA. These extra limits are designed for people in your situation — use them to accelerate your retirement savings in these final working years.` });
+    } else if (age >= 60 && age <= 63) {
+      tips.push({ type: "positive", category: "Super Catch-Up", message: `Ages 60-63 have the highest 401(k) catch-up limit: ${fmt(FINANCIAL_CONSTANTS.four01k.catchUp60_63)}/year. This is a limited window — maximize these contributions while you can. That's ${fmt(Math.round(FINANCIAL_CONSTANTS.four01k.catchUp60_63 / 12))}/month to shelter from taxes.` });
     }
   }
 
@@ -749,13 +863,16 @@ function TipsSection({ state }) {
     <div>
       {dynamicTips.length > 0 && (
         <div style={styles.card}>
-          <div style={styles.cardTitle}>Personalized Insights</div>
+          <div style={styles.cardTitle}>Your Personalized Financial Guidance</div>
+          <div style={{ fontSize: "11px", color: colors.textMuted, marginBottom: "16px", fontStyle: "italic" }}>
+            Based on the income, expenses, loans, and profile information you've entered. Update your data for more accurate recommendations.
+          </div>
           {dynamicTips.map((tip, i) => (
             <div key={i} style={styles.tipCard(tip.type)}>
               <span style={{ ...styles.tag, background: tip.type === "warning" ? colors.red : tip.type === "caution" ? colors.yellow : tip.type === "positive" ? colors.green : colors.accent, color: colors.bg }}>
                 {tip.category}
               </span>
-              <span style={{ fontSize: "13px", lineHeight: 1.6 }}>{tip.message}</span>
+              <div style={{ fontSize: "13px", lineHeight: 1.8, whiteSpace: "pre-line" }}>{tip.message}</div>
             </div>
           ))}
         </div>
