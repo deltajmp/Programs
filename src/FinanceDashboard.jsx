@@ -1298,12 +1298,215 @@ function ProfileSection({ state, dispatch }) {
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════
 
+// ─── MODULE: FINANCIAL NEWS FEED ────────────────────────────
+const NEWS_FEEDS = [
+  { name: "CNBC Personal Finance", url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=21324812", category: "Personal Finance" },
+  { name: "Reuters Business", url: "https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best", category: "Markets & Economy" },
+  { name: "IRS News", url: "https://www.irs.gov/newsroom/feeds", category: "Tax & Policy" },
+];
+
+const RSS_PROXY = "https://api.rss2json.com/v1/api.json?rss_url=";
+
+function NewsSection() {
+  const [articles, setArticles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedFeed, setSelectedFeed] = useState("all");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchNews() {
+      setLoading(true);
+      setError(null);
+      const allArticles = [];
+
+      const results = await Promise.allSettled(
+        NEWS_FEEDS.map(async (feed) => {
+          try {
+            const res = await fetch(RSS_PROXY + encodeURIComponent(feed.url));
+            if (!res.ok) return [];
+            const data = await res.json();
+            if (data.status !== "ok" || !data.items) return [];
+            return data.items.slice(0, 8).map((item) => ({
+              title: item.title,
+              link: item.link,
+              pubDate: item.pubDate,
+              description: (item.description || "").replace(/<[^>]*>/g, "").slice(0, 200),
+              source: feed.name,
+              category: feed.category,
+            }));
+          } catch {
+            return [];
+          }
+        })
+      );
+
+      results.forEach((r) => {
+        if (r.status === "fulfilled" && r.value.length > 0) {
+          allArticles.push(...r.value);
+        }
+      });
+
+      if (cancelled) return;
+
+      if (allArticles.length === 0) {
+        setError("Unable to load news feeds. Check your connection and try again.");
+      }
+
+      allArticles.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate));
+      setArticles(allArticles);
+      setLoading(false);
+    }
+
+    // Check cache first
+    try {
+      const cached = localStorage.getItem("finpulse-news-cache");
+      if (cached) {
+        const { articles: cachedArticles, timestamp } = JSON.parse(cached);
+        const ageMinutes = (Date.now() - timestamp) / 1000 / 60;
+        if (ageMinutes < 30 && cachedArticles.length > 0) {
+          setArticles(cachedArticles);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch { /* ignore cache errors */ }
+
+    fetchNews().then(() => {
+      // Cache results
+      if (!cancelled) {
+        try {
+          localStorage.setItem("finpulse-news-cache", JSON.stringify({ articles: articles.length > 0 ? articles : [], timestamp: Date.now() }));
+        } catch { /* ignore */ }
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // Save to cache when articles update
+  useEffect(() => {
+    if (articles.length > 0) {
+      try {
+        localStorage.setItem("finpulse-news-cache", JSON.stringify({ articles, timestamp: Date.now() }));
+      } catch { /* ignore */ }
+    }
+  }, [articles]);
+
+  const formatDate = (dateStr) => {
+    try {
+      const d = new Date(dateStr);
+      const now = new Date();
+      const diffHours = Math.round((now - d) / (1000 * 60 * 60));
+      if (diffHours < 1) return "Just now";
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffHours < 48) return "Yesterday";
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    } catch {
+      return "";
+    }
+  };
+
+  const filtered = selectedFeed === "all" ? articles : articles.filter((a) => a.category === selectedFeed);
+  const categories = ["all", ...new Set(NEWS_FEEDS.map((f) => f.category))];
+
+  return (
+    <div>
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>Financial News & Updates</div>
+        <div style={{ fontSize: "12px", color: colors.textDim, marginBottom: "16px", lineHeight: 1.5 }}>
+          Live headlines from trusted financial sources. Updated every 30 minutes.
+        </div>
+
+        <div style={{ display: "flex", gap: "8px", marginBottom: "20px", flexWrap: "wrap" }}>
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setSelectedFeed(cat)}
+              style={{
+                padding: "6px 14px",
+                borderRadius: "20px",
+                border: "none",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+                background: selectedFeed === cat ? colors.accent : colors.inputBg,
+                color: selectedFeed === cat ? colors.bg : colors.textDim,
+                transition: "all 0.2s",
+              }}
+            >
+              {cat === "all" ? "All Sources" : cat}
+            </button>
+          ))}
+        </div>
+
+        {loading && (
+          <div style={{ textAlign: "center", padding: "40px 0", color: colors.textMuted }}>
+            Loading latest financial news...
+          </div>
+        )}
+
+        {error && !loading && (
+          <div style={{ ...styles.tipCard("caution"), textAlign: "center" }}>
+            {error}
+          </div>
+        )}
+
+        {!loading && filtered.map((article, i) => (
+          <a
+            key={i}
+            href={article.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: "none", color: "inherit", display: "block" }}
+          >
+            <div style={{
+              background: colors.inputBg,
+              border: `1px solid ${colors.border}`,
+              borderRadius: "10px",
+              padding: "16px 18px",
+              marginBottom: "14px",
+              transition: "border-color 0.2s",
+              cursor: "pointer",
+            }}
+              onMouseEnter={(e) => e.currentTarget.style.borderColor = colors.accent}
+              onMouseLeave={(e) => e.currentTarget.style.borderColor = colors.border}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", marginBottom: "6px" }}>
+                <div style={{ fontWeight: 600, fontSize: "14px", lineHeight: 1.4, color: colors.text }}>{article.title}</div>
+                <span style={{ fontSize: "11px", color: colors.textMuted, whiteSpace: "nowrap", flexShrink: 0 }}>{formatDate(article.pubDate)}</span>
+              </div>
+              {article.description && (
+                <div style={{ fontSize: "12px", color: colors.textDim, lineHeight: 1.5, marginBottom: "8px" }}>
+                  {article.description}{article.description.length >= 200 ? "..." : ""}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <span style={{ ...styles.tag, background: colors.accentDim, color: colors.accent, margin: 0 }}>{article.source}</span>
+                <span style={{ ...styles.tag, background: colors.inputBg, color: colors.textMuted, margin: 0, border: `1px solid ${colors.border}` }}>{article.category}</span>
+              </div>
+            </div>
+          </a>
+        ))}
+
+        {!loading && filtered.length === 0 && !error && (
+          <div style={{ textAlign: "center", padding: "40px 0", color: colors.textMuted }}>
+            No articles found for this filter.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const SECTIONS = [
   { key: "profile", label: "Profile", icon: "⚙" },
   { key: "income", label: "Income", icon: "💵" },
   { key: "expenses", label: "Expenses", icon: "📋" },
   { key: "projector", label: "Projector", icon: "📊" },
   { key: "tips", label: "Tips", icon: "💡" },
+  { key: "news", label: "News", icon: "📰" },
   { key: "loans", label: "Loans", icon: "🎓" },
   { key: "deadlines", label: "Deadlines", icon: "📅" },
   { key: "spending", label: "Fun Money", icon: "✈" },
@@ -1337,6 +1540,7 @@ export default function FinanceDashboard() {
       case "expenses": return <ExpenseSection state={state} dispatch={dispatch} />;
       case "projector": return <ProjectorSection state={state} />;
       case "tips": return <TipsSection state={state} />;
+      case "news": return <NewsSection />;
       case "loans": return <LoanSection state={state} dispatch={dispatch} />;
       case "deadlines": return <DeadlinesSection state={state} />;
       case "spending": return <SpendingCalcSection state={state} />;
