@@ -666,9 +666,66 @@ function ExpenseSection({ state, dispatch }) {
   };
 
   const currentTx = getCurrentMonthTransactions(state.transactions);
+  const monthlyIncome = getMonthlyIncome(state.incomes);
+
+  const RECOMMENDED_CATEGORIES = [
+    { name: "Housing (Rent/Mortgage)", pct: 0.25, note: "Includes rent or mortgage, property tax, insurance" },
+    { name: "Utilities", pct: 0.05, note: "Electric, gas, water, internet, phone" },
+    { name: "Groceries", pct: 0.10, note: "Food and household essentials" },
+    { name: "Transportation", pct: 0.10, note: "Car payment, gas, insurance, maintenance, or transit" },
+    { name: "Health & Insurance", pct: 0.05, note: "Premiums, copays, prescriptions, dental" },
+    { name: "Dining & Entertainment", pct: 0.05, note: "Restaurants, takeout, streaming, hobbies" },
+    { name: "Personal & Clothing", pct: 0.05, note: "Clothing, haircuts, personal care" },
+    { name: "Subscriptions & Misc", pct: 0.03, note: "Apps, memberships, miscellaneous" },
+    { name: "Debt Payments", pct: 0.10, note: "Student loans, credit cards, personal loans" },
+    { name: "Savings & Investing", pct: 0.20, note: "Emergency fund, Roth IRA, 401(k), brokerage" },
+  ];
+
+  // Check which recommended categories the user has already added (fuzzy match)
+  const hasCategory = (recName) => {
+    const keywords = recName.toLowerCase().split(/[\s/()&,]+/).filter((w) => w.length > 2);
+    return state.expenseCategories.some((cat) => {
+      const catLower = cat.name.toLowerCase();
+      return keywords.some((kw) => catLower.includes(kw));
+    });
+  };
 
   return (
     <div>
+      {monthlyIncome > 0 && (
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Recommended Monthly Budget</div>
+          <div style={{ fontSize: "12px", color: colors.textDim, marginBottom: "16px", lineHeight: 1.6 }}>
+            Based on your <strong style={{ color: colors.green }}>{fmt(monthlyIncome)}/month</strong> income, here's a suggested budget breakdown. These percentages follow standard financial planning guidelines — adjust to fit your situation.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "8px" }}>
+            {RECOMMENDED_CATEGORIES.map((rec) => {
+              const amount = Math.round(monthlyIncome * rec.pct);
+              const alreadyAdded = hasCategory(rec.name);
+              const isSavings = rec.pct >= 0.2;
+              const bgColor = isSavings ? colors.greenDim : colors.inputBg;
+              const borderColor = isSavings ? colors.green : alreadyAdded ? colors.accent : colors.border;
+              return (
+                <div key={rec.name} style={{ background: bgColor, border: `1px solid ${borderColor}`, borderRadius: "10px", padding: "14px 16px", position: "relative" }}>
+                  {alreadyAdded && (
+                    <span style={{ position: "absolute", top: "8px", right: "10px", fontSize: "10px", color: colors.green, fontWeight: 700 }}>ADDED</span>
+                  )}
+                  <div style={{ fontWeight: 700, fontSize: "13px", marginBottom: "4px", color: isSavings ? colors.green : colors.text }}>{rec.name}</div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "4px" }}>
+                    <span style={{ fontSize: "20px", fontWeight: 800, color: isSavings ? colors.green : colors.accent }}>{fmt(amount)}</span>
+                    <span style={{ fontSize: "12px", color: colors.textDim }}>{Math.round(rec.pct * 100)}% of income</span>
+                  </div>
+                  <div style={{ fontSize: "11px", color: colors.textMuted, lineHeight: 1.4 }}>{rec.note}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: "11px", color: colors.textMuted, marginTop: "12px", fontStyle: "italic", lineHeight: 1.5 }}>
+            These add up to ~98% of income, leaving a small buffer. The 50/30/20 rule: ~50% for needs (housing, utilities, groceries, transport, health), ~30% for wants (dining, personal, subscriptions), ~20% for savings and debt. Adjust based on your priorities — if you have no debt, redirect that 10% to savings.
+          </div>
+        </div>
+      )}
+
       <div style={styles.card}>
         <div style={styles.cardTitle}>Expense Categories</div>
         <div style={styles.row}>
